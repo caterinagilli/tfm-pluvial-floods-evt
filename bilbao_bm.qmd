@@ -1,0 +1,361 @@
+---
+title: "Bilbao BM"
+format: 
+  html:
+    embed-resources: false
+    fig-format: pdf
+
+
+editor: visual
+---
+
+## data
+
+```{r libraries}
+#| echo: false
+#| warning: false
+
+library(ggplot2); theme_set(theme_minimal())
+library(forecast)
+library(seasonal)
+library(tseries)
+library(ncdf4) # package for netcdf manipulation
+library(CFtime)
+library(dplyr)
+library(astsa)
+library(tseries)
+#install.packages("ClimInd")
+library(ClimInd)
+library(extRemes)
+```
+
+```{r edit}
+city <- "bilbao"
+color1 <- "sienna" #rx5d
+color2 <- "darkorange" #base
+color3 <- "darkgoldenrod1" #rx1d
+winter_color <- "skyblue"
+spring_color <- "springgreen3"
+summer_color <- "gold"
+autumn_color <- "tomato3"
+colors <- c("Winter" = winter_color, "Spring" = spring_color, "Summer" = summer_color, "Autumn" = autumn_color)
+```
+
+```{r data-daily}
+#| echo: false
+#| warning: false
+
+path <- paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_sum.nc", sep="")
+tp_d <- nc_open(path)
+# extracting time (and transforming to dates, since we don't use the hours)
+cf <- CFtime(tp_d$dim$time$units, tp_d$dim$time$calendar, tp_d$dim$time$vals)
+
+dates <- substring(CFtimestamp(cf), 1,10)
+days <- as.numeric(substring(CFtimestamp(cf), 9,10))
+months <- as.numeric(substring(CFtimestamp(cf), 6,7))
+years <- as.numeric(substring(CFtimestamp(cf), 1,4))
+
+daily_df_neg <- data.frame(year = years, month = months, day = days, date=dates, tp = ncvar_get(tp_d, "tp")*1000/20)
+daily_df <- daily_df_neg %>% mutate(tp = ifelse(tp < 0, 0, tp))
+daily_tp_positive <- daily_df$tp[daily_df$tp > 0]
+
+get_season_d <- function(month, day) {
+  if ((month == 12 && day >= 21) || month %in% c(1, 2) || (month == 3 && day < 20)) {
+    return("Winter")
+  } else if ((month == 3 && day >= 20) || month %in% c(4, 5) || (month == 6 && day < 21)) {
+    return("Spring")
+  } else if ((month == 6 && day >= 21) || month %in% c(7, 8) || (month == 9 && day < 22)) {
+    return("Summer")
+  } else if ((month == 9 && day >= 22) || month %in% c(10, 11) || (month == 12 && day < 21)) {
+    return("Autumn")
+  }
+}
+
+# Vectorize the get_season function
+get_season_vec_d <- Vectorize(get_season_d)
+# Add a season column
+daily_df <- daily_df %>%
+  mutate(season = get_season_vec_d(month, day)) %>%
+  select(date, tp, year, season, month, day)
+daily_df$season <- as.factor(daily_df$season)
+
+```
+
+```{r data-monthly}
+#| echo: false
+#| warning: false
+
+tp_m <- nc_open(paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_monthly_sum.nc", sep=""))
+rx1d <- nc_open( paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_rx1d_monthly_sum.nc", sep=""))
+rx5d <- nc_open( paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_rx5d_monthly_sum.nc", sep=""))
+
+cf_m <- CFtime(tp_m$dim$time$units, tp_m$dim$time$calendar, tp_m$dim$time$vals)
+dates <- substring(CFtimestamp(cf_m), 1,7)
+years <- as.numeric(substring(CFtimestamp(cf_m), 1,4))
+months <- as.numeric(substring(CFtimestamp(cf_m), 6,7))
+
+monthly_df <- data.frame(year = years, month = months, date=dates, tp = ncvar_get(tp_m, "tp")*1000/20, rx1d = ncvar_get(rx1d, "tp")*1000/20, rx5d = ncvar_get(rx5d, "tp")*1000/20)
+
+get_season_m <- function(month) {
+  # month <- month(date)
+  ifelse(month %in% c(12, 01, 02), "Winter",
+         ifelse(month %in% c(03, 04, 05), "Spring",
+                ifelse(month %in% c(06, 07, 08), "Summer", "Autumn")))
+}
+
+# Add a season column
+monthly_df <- monthly_df %>%
+  mutate(season = get_season_m(month)) %>%
+  select(date, tp, rx1d, rx5d, year, season, month)
+```
+
+## above threshold
+
+```{r above-threshold}
+# Filter the dataframe to keep only the values above the 90th percentile
+filtered_data_90 <- monthly_df[monthly_df$tp >= quantile(monthly_df$tp, 0.90), ]
+filtered_data_90 <- filtered_data_90 %>%
+  select(date, tp, year, season, month)
+colnames(filtered_data_90)[2] <- "tp_90"
+
+# Filter the dataframe to keep only the values above the 95th percentile
+filtered_data_95 <- monthly_df[monthly_df$tp >= quantile(monthly_df$tp, 0.95), ]
+filtered_data_95 <- filtered_data_95 %>%
+  select(date, tp, year, season, month)
+colnames(filtered_data_95)[2] <- "tp_95"
+
+# Filter the dataframe to keep only the values above the 99th percentile
+filtered_data_99 <- monthly_df[monthly_df$tp >= quantile(monthly_df$tp, 0.99), ]
+filtered_data_99 <- filtered_data_99 %>%
+  select(date, tp, year, season, month)
+colnames(filtered_data_99)[2] <- "tp_99"
+
+all_dates <- data.frame(year = monthly_df$year, month = monthly_df$month, date = monthly_df$date, season = monthly_df$season)
+
+complete_data <- data.frame(all_dates) %>%
+  left_join(filtered_data_90, by = c("year", "month", "date", "season")) %>%
+  left_join(filtered_data_95, by = c("year", "month", "date", "season"))%>%
+  left_join(filtered_data_99, by = c("year", "month", "date", "season"))
+
+ggplot(complete_data, aes(x = year)) + 
+  # geom_line(na.rm = TRUE) +    # For a line plot
+  # geom_point(y=tp_90, na.rm = TRUE)+
+  geom_point(aes(y=tp_90, col = "90th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_95, col = "95th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) +   # To add points on the line
+  labs(title = "",
+       x = "year",
+       y = "tp") +
+  scale_color_manual(name = "", values = c("90th percentile" = color3, "95th percentile" = color2, "99th percentile" = color1), labels = c("90th percentile", "95th percentile", "99th percentile"), aesthetics = c("colour", "fill")) +
+   theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7)) + 
+  scale_x_continuous(breaks = complete_data$year)
+
+ggplot(complete_data, aes(x = month)) + 
+  # geom_line(na.rm = TRUE) +    # For a line plot
+  # geom_point(y=tp_90, na.rm = TRUE)+
+  geom_point(aes(y=tp_90, col = "90th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_95, col = "95th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) +   # To add points on the line
+  labs(title = "",
+       x = "mont",
+       y = "tp") +
+  scale_color_manual(name = "", values = c("90th percentile" = color3, "95th percentile" = color2, "99th percentile" = color1), labels = c("90th percentile", "95th percentile", "99th percentile"), aesthetics = c("colour", "fill")) +
+   theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7)) + scale_x_continuous(breaks = complete_data$month)
+
+ggplot(complete_data, aes(x = season)) + 
+  # geom_line(na.rm = TRUE) +    # For a line plot
+  # geom_point(y=tp_90, na.rm = TRUE)+
+  geom_point(aes(y=tp_90, col = "90th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_95, col = "95th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) +   # To add points on the line
+  labs(title = "",
+       x = "season",
+       y = "tp") +
+  scale_color_manual(name = "", values = c("90th percentile" = color3, "95th percentile" = color2, "99th percentile" = color1), labels = c("90th percentile", "95th percentile", "99th percentile"), aesthetics = c("colour", "fill")) +
+   theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7))
+```
+
+```{r above-threshold-daily}
+# Filter the dataframe to keep only the values above the 90th percentile
+filtered_data_90 <- daily_df[daily_df$tp >= quantile(daily_df$tp, 0.90), ]
+filtered_data_90 <- filtered_data_90 %>%
+  select(date, tp, year, season, month)
+colnames(filtered_data_90)[2] <- "tp_90"
+
+# Filter the dataframe to keep only the values above the 95th percentile
+filtered_data_95 <- daily_df[daily_df$tp >= quantile(daily_df$tp, 0.95), ]
+filtered_data_95 <- filtered_data_95 %>%
+  select(date, tp, year, season, month)
+colnames(filtered_data_95)[2] <- "tp_95"
+
+
+# Filter the dataframe to keep only the values above the 99th percentile
+filtered_data_99 <- daily_df[daily_df$tp >= quantile(daily_df$tp, 0.99), ]
+filtered_data_99 <- filtered_data_99 %>%
+  select(date, tp, year, season, month)
+colnames(filtered_data_99)[2] <- "tp_99"
+
+blocks.y <- blockmaxxer(daily_df, blocks = daily_df$year, which = "tp")
+colnames(blocks.y)[2] <- "yearly_max"
+
+blocks.m <- blockmaxxer(daily_df, blocks = daily_df$month, which = "tp")
+colnames(blocks.m)[2] <- "monthly_max"
+
+all_dates <- data.frame(year = daily_df$year, month = daily_df$month, date = daily_df$date, season = daily_df$season)
+
+complete_data <- data.frame(all_dates) %>%
+  left_join(filtered_data_90, by = c("year", "month", "date", "season")) %>%
+  left_join(filtered_data_95, by = c("year", "month", "date", "season"))%>%
+  left_join(filtered_data_99, by = c("year", "month", "date", "season"))%>%
+  left_join(blocks.y, by = c("year", "month", "date", "season"))%>%
+  left_join(blocks.m, by = c("year", "month", "date", "season"))
+
+ggplot(complete_data, aes(x = year)) + 
+  # geom_line(na.rm = TRUE) +    # For a line plot
+  # geom_point(y=tp_90, na.rm = TRUE)+
+  geom_point(aes(y=tp_90, col = "90th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_95, col = "95th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) +   # To add points on the line
+  labs(title = "",
+       x = "year",
+       y = "tp") +
+  scale_color_manual(name = "", values = c("90th percentile" = color3, "95th percentile" = color2, "99th percentile" = color1), labels = c("90th percentile", "95th percentile", "99th percentile"), aesthetics = c("colour", "fill")) +
+   theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7)) + 
+  scale_x_continuous(breaks = complete_data$year)
+
+ggplot(complete_data, aes(x = month)) + 
+  # geom_line(na.rm = TRUE) +    # For a line plot
+  # geom_point(y=tp_90, na.rm = TRUE)+
+  geom_point(aes(y=tp_90, col = "90th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_95, col = "95th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) +   # To add points on the line
+  labs(title = "",
+       x = "mont",
+       y = "tp") +
+  scale_color_manual(name = "", values = c("90th percentile" = color3, "95th percentile" = color2, "99th percentile" = color1), labels = c("90th percentile", "95th percentile", "99th percentile"), aesthetics = c("colour", "fill")) +
+   theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7)) + scale_x_continuous(breaks = complete_data$month)
+
+ggplot(complete_data, aes(x = season)) + 
+  # geom_line(na.rm = TRUE) +    # For a line plot
+  # geom_point(y=tp_90, na.rm = TRUE)+
+  geom_point(aes(y=tp_90, col = "90th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_95, col = "95th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) +   # To add points on the line
+  labs(title = "",
+       x = "season",
+       y = "tp") +
+  scale_color_manual(name = "", values = c("90th percentile" = color3, "95th percentile" = color2, "99th percentile" = color1), labels = c("90th percentile", "95th percentile", "99th percentile"), aesthetics = c("colour", "fill")) +
+   theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7))
+```
+
+```{r bm-data}
+blocks.y <- blockmaxxer(daily_df, blocks = daily_df$year, which = "tp")
+blocks.m <- blockmaxxer(daily_df, blocks = daily_df$month, which = "tp")
+
+#plot of yearly
+plot(daily_df$year, daily_df$tp, xlab = "Year", ylab = "tp",
+    cex = 1.25, cex.lab = 1.25,
+    col = "darkblue", bg = "lightblue", pch = 21)
+points(blocks.y$year, blocks.y$tp, col="darkred", cex=1.5)
+
+#plot of monthly
+plot(daily_df$month, daily_df$tp, xlab = "Year", ylab = "tp",
+    cex = 1.25, cex.lab = 1.25,
+    col = "darkblue", bg = "lightblue", pch = 21)
+points(blocks.m$month, blocks.m$tp, col="darkred", cex=1.5)
+# points(blocks.y$year, blocks.y$tp, col="red", pch=19)
+
+# plot(blocks.y$year, blocks.y$tp, type="l", xlab = "Year", ylab="tp")
+
+
+ggplot(complete_data, aes(x = year)) + 
+  # geom_line(na.rm = TRUE) +    # For a line plot
+  # geom_point(y=tp_90, na.rm = TRUE)+
+  geom_point(aes(y=tp_90, col = "90th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_95, col = "95th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y = yearly_max), 
+             shape = 21,    # Shape with border
+             color = "red", # Border color
+             fill = color1,# Fill color (empty inside)
+             size = 1.5,      # Size of the points
+             stroke = 1) +  # Width of the border line
+  labs(title = "",
+       x = "year",
+       y = "tp") +
+  scale_color_manual(name = "", values = c("90th percentile" = color3, "95th percentile" = color2, "99th percentile" = color1), labels = c("90th percentile", "95th percentile", "99th percentile"), aesthetics = c("colour", "fill")) +
+   theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7)) + 
+  scale_x_continuous(breaks = complete_data$year)
+
+```
+
+```{r bm-fit-yearly}
+fit0 <- fevd(tp, data=blocks.y)
+fit0
+# Check the validity of the fit
+plot(fit0, "qq2")
+plot(fit0, "rl", main="")
+plot(fit0, "density")
+ci(fit0, type="parameter")
+ci(fit0, return.period = c(2,20,100))
+plot(fit0)
+```
+
+```{r bm-fit-monthly}
+# fit0.m <- fevd(tp, data=blocks.m)
+# Check the validity of the fit
+# plot(fit0.m, "qq2")
+# plot(fit0.m, "rl", main="")
+# plot(fit0.m, "density")
+# ci(fit0.m, type="parameter")
+# ci(fit0.m, return.period = c(1,5,20, 35))
+
+```
+
+```{r bm-loc}
+fit.loc.season <- fevd(x=tp, data = blocks.y, location.fun = ~season)
+plot(fit.loc.season)
+fit.loc.season
+lr.test(fit0, fit.loc.season)
+
+plot(fit.loc.season, "qq2")
+plot(fit.loc.season, "rl", main="")
+plot(fit.loc.season, "density")
+ci(fit.loc.season, type="parameter")
+# ci(fit.loc.season, return.period = c(1,5,20, 35))
+```
+
+```{r fit-loc-scale}
+fit.loc.scale.season <- fevd(x=tp, data = blocks.y, location.fun = ~season, scale.fun = ~season)
+plot(fit.loc.scale.season)
+fit.loc.scale.season
+lr.test(fit0, fit.loc.scale.season)
+
+plot(fit.loc.scale.season, "qq2")
+plot(fit.loc.scale.season, "rl", main="")
+plot(fit.loc.scale.season, "density")
+ci(fit.loc.scale.season, type="parameter")
+ # ci(fit.loc.scale.season, return.period = c(1,5,20, 35))
+```
+
+```{r fit-scale}
+# fit.scale.season <- fevd(x=tp, data = blocks.y, scale.fun = ~season)
+# plot(fit.scale.season)
+# lr.test(fit0, fit.scale.season)
+# lr.test(fit.loc.scale.season, fit.scale.season)
+```
+
+```{r fit-gumbell}
+
+fit.gumbell <- fevd(x=tp, data = blocks.y, type = "Gumbel")
+fit.gumbell
+plot(fit.gumbell)
+plot(fit.gumbell, "trace")
+
+# Test of null hypothesis that the shape parameter is zero.
+# The likelihood-ratio test and checking the confidence intervals
+# for fit1.
+
+lr.test(fit0, fit.gumbell)
+lr.test(fit.gumbell, fit.loc.scale.season)
+```
