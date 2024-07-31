@@ -1,0 +1,31 @@
+DAILY
+cdo shifttime,-1hour tp_hourly_year.nc shifted_tp_hourly_year.nc
+cdo -b f32 daysum shifted_tp_hourly_year.nc tp_daily_year_intermediate.nc
+cdo seldate,year0101,year1231 tp_daily_year_intermediate.nc tp_daily_year.nc
+
+MONTHLY
+cdo -monsum daily_year.nc monthly_year.nc
+
+rx1d
+cdo -monmax daily_year.nc rx1d_year.nc
+
+rx5d
+cdo -monmax -runsum,5 -selmonth,1 daily_year.nc rx5day_monthly_year_1.nc
+cdo -monmax -runsum,5 -selmonth,2 daily_year.nc rx5day_monthly_year_2.nc
+cdo -monmax -runsum,5 -selmonth,3 daily_year.nc rx5day_monthly_year_3.nc
+cdo -monmax -runsum,5 -selmonth,4 daily_year.nc rx5day_monthly_year_4.nc
+cdo -monmax -runsum,5 -selmonth,5 daily_year.nc rx5day_monthly_year_5.nc
+cdo -monmax -runsum,5 -selmonth,6 daily_year.nc rx5day_monthly_year_6.nc
+cdo -monmax -runsum,5 -selmonth,7 daily_year.nc rx5day_monthly_year_7.nc
+cdo -monmax -runsum,5 -selmonth,8 daily_year.nc rx5day_monthly_year_8.nc
+cdo -monmax -runsum,5 -selmonth,9 daily_year.nc rx5day_monthly_year_9.nc
+cdo -monmax -runsum,5 -selmonth,10 daily_year.nc rx5day_monthly_year_10.nc
+cdo -monmax -runsum,5 -selmonth,11 daily_year.nc rx5day_monthly_year_11.nc
+cdo -monmax -runsum,5 -selmonth,12 daily_year.nc rx5day_monthly_year_12.nc
+cdo mergetime rx5day_monthly_year_1.nc rx5day_monthly_year_2.nc rx5day_monthly_year_3.nc rx5day_monthly_year_4.nc rx5day_monthly_year_5.nc rx5day_monthly_year_6.nc rx5day_monthly_year_7.nc rx5day_monthly_year_8.nc rx5day_monthly_year_9.nc rx5day_monthly_year_10.nc rx5day_monthly_year_11.nc rx5day_monthly_year_12.nc rx5day_monthly_year.nc
+
+SELECTING THE AREA (ex. Bilbao)
+cdo sellonlatbox,-3.25,-2.75,43,43.5 tp_year.nc tp_bilbao_year.nc
+
+SUM OVER AREA (ex.Bilbao)
+cdo -zonsum -mersum tp_bilbao_year.nc tp_bilbao_year_sum.nc
