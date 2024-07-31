@@ -1,0 +1,172 @@
+---
+title: "Time Series analisis for Brussels"
+format: 
+  html:
+    embed-resources: false
+
+editor: visual
+---
+
+## Introductory chunks
+
+```{r libraries}
+#| echo: false
+#| warning: false
+
+library(ggplot2); theme_set(theme_minimal())
+library(forecast)
+library(seasonal)
+library(tseries)
+library(ncdf4) # package for netcdf manipulation
+library(CFtime)
+library(dplyr)
+library(astsa)
+library(tseries)
+```
+
+```{r edit}
+city <- "bucharest"
+color1 <- "blue"
+color2 <- "cornflowerblue"
+color3 <- "lightblue"
+```
+
+```{r data-daily}
+#| echo: false
+#| warning: false
+
+path <- paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_sum.nc", sep="")
+tp_d <- nc_open(path)
+# extracting time (and transforming to dates, since we don't use the hours)
+cf <- CFtime(tp_d$dim$time$units, tp_d$dim$time$calendar, tp_d$dim$time$vals)
+
+dates <- substring(CFtimestamp(cf), 1,10)
+days <- as.numeric(substring(CFtimestamp(cf), 9,10))
+months <- as.numeric(substring(CFtimestamp(cf), 6,7))
+years <- as.numeric(substring(CFtimestamp(cf), 1,4))
+
+daily_df <- data.frame(year = years, month = months, day = days, date=dates, tp = ncvar_get(tp_d, "tp"))
+get_season <- function(month, day) {
+  if ((month == 12 && day >= 21) || month %in% c(1, 2) || (month == 3 && day < 20)) {
+    return("Winter")
+  } else if ((month == 3 && day >= 20) || month %in% c(4, 5) || (month == 6 && day < 21)) {
+    return("Spring")
+  } else if ((month == 6 && day >= 21) || month %in% c(7, 8) || (month == 9 && day < 22)) {
+    return("Summer")
+  } else if ((month == 9 && day >= 22) || month %in% c(10, 11) || (month == 12 && day < 21)) {
+    return("Autumn")
+  }
+}
+
+# Vectorize the get_season function
+get_season_vec <- Vectorize(get_season)
+# Add a season column
+daily_df <- daily_df %>%
+  mutate(season = get_season_vec(month, day)) %>%
+  select(date, tp, year, season, month, day)
+# daily_df
+```
+
+```{r chunk-1}
+autumn_df <- daily_df %>%
+  filter(season == "Autumn")
+# autumn_df
+autumn_ts <- ts(data = autumn_df[,2], start = c(1990,09,22))
+seasonal_tp_sum <- daily_df %>%
+  group_by(year, season) %>%
+  summarize(total_tp = sum(tp, na.rm = TRUE))
+seasonal_tp_sum
+ggplot(data = seasonal_tp_sum, aes(x = year, y = total_tp, color = season)) +
+  geom_line() +  # Line plot for each season
+  labs(title = "Total tp by Season Across Years", x = "Year", y = "Total tp") +
+  scale_color_manual(values = c("orange", "green", "red", "blue")) +  # Custom color for each season
+  theme_minimal()
+
+ggplot(data = seasonal_tp_sum, aes(x = year, y = total_tp, color = season)) +
+  geom_line() +  # Line plot for each season 
+  geom_smooth() + 
+#, color = color2, fill = color2) +
+  facet_wrap(~ season, scales = "fixed", ncol = 2) +  # Separate plots for each season
+  labs(title = "Total tp by Season Across Years", x = "Year", y = "Total tp") +
+  scale_color_manual(values = c("orange", "green", "red", "blue")) +  # Custom color for each season
+  theme_minimal()
+
+# filter(seasonal_tp_sum, season == "Autumn")$total_tp
+# 
+# autoplot(autumn_ts)+ 
+#   geom_smooth(color = color2, fill = color2) + 
+#   geom_line(data = filter(seasonal_tp_sum, season == "Autumn")$total_tp, color = "red") +
+#   labs(title = "Autumn Time Series with Total tp by Season", x = "Date", y = "tp") 
+```
+
+```{# {r seasons}
+# 
+# 
+# daily_df
+# complete_data
+# # Count non-NA values of tp_90 for each season
+# count_90 <- complete_data %>%
+#   filter(!is.na(tp_90)) %>%
+#   group_by(season) %>%
+#   summarise(count = n())
+# 
+# count_95<- complete_data %>%
+#   filter(!is.na(tp_95)) %>%
+#   group_by(season) %>%
+#   summarise(count = n())
+# 
+# count_99 <- complete_data %>%
+#   filter(!is.na(tp_99)) %>%
+#   group_by(season) %>%
+#   summarise(count = n())
+# 
+# seasonal_counts <- count_90 %>%
+#   # left_join(count90, by = c("season")) %>%
+#   left_join(count_95, by = c("season")) %>%
+#   left_join(count_99, by = c("season"))
+# colnames(seasonal_counts)[2:4] <- c("counts 90th" , "counts 95th", "counts 99th")
+# 
+# 
+# # Display the result
+# print(seasonal_counts)
+# path_o_2 <- paste("C:/Users/caterina.gilli/000/uni/TFM/data/",city, "_high_percentiles_seasonal_count.csv", sep="")
+# write.csv(seasonal_counts, file = path_o_2)
+
+```
+
+```{r above-threshold-daily}
+# Filter the dataframe to keep only the values above the 90th percentile
+d_filtered_data_99 <- daily_df[daily_df$tp >= quantile(daily_df$tp, 0.99), ]
+colnames(d_filtered_data_99)[4] <- "tp_99"
+
+
+d_all_dates <- data.frame(year = daily_df$year, month = daily_df$month, date = daily_df$date)
+# Add a season column
+
+
+d_complete_data <- data.frame(d_all_dates) %>%
+  left_join(d_filtered_data_99, by = c("year", "month", "date"))
+# 
+# d_complete_data <- d_complete_data %>%
+#   mutate(season = get_season(month))
+# 
+# ggplot(d_complete_data, aes(x = year)) + 
+#   geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) + 
+#   labs(title = "",
+#        x = "Date",
+#        y = "tp") +
+#   scale_color_manual(name = "", values = c("99th percentile" = color1), labels = c("99th percentile"), aesthetics = c("colour", "fill")) +
+#    theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7))
+# 
+# ggplot(d_complete_data, aes(x = month)) + 
+#   geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) +  
+#   labs(title = "",
+#        x = "Date",
+#        y = "tp") +
+#   scale_color_manual(name = "", values = c("99th percentile" = color1), labels = c("99th percentile"), aesthetics = c("colour", "fill")) +
+#    theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7))
+# 
+# path_o_d <- paste("C:/Users/caterina.gilli/000/uni/TFM/data/",city, "_daily_99th_percentile.csv", sep="")
+# write.csv(complete_data, file = path_o_d)
+
+```
