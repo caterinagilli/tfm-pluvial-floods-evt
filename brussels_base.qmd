@@ -1,0 +1,348 @@
+---
+title: "Brussels base"
+format: 
+  html:
+    embed-resources: false
+    fig-format: pdf
+
+editor: visual
+---
+
+## data
+
+```{r libraries}
+#| echo: false
+#| warning: false
+
+library(ggplot2); theme_set(theme_minimal())
+library(forecast)
+library(seasonal)
+library(tseries)
+library(ncdf4) # package for netcdf manipulation
+library(CFtime)
+library(dplyr)
+library(astsa)
+library(tseries)
+#install.packages("ClimInd")
+library(ClimInd)
+
+```
+
+```{r edit}
+city <- "brussels"
+color1 <- "magenta4" #rx5d
+color2 <- "mediumpurple" #base
+color3 <- "plum3" #rx1d
+winter_color <- "skyblue"
+spring_color <- "springgreen3"
+summer_color <- "gold"
+autumn_color <- "tomato3"
+
+colors <- c("Winter" = winter_color, "Spring" = spring_color, "Summer" = summer_color, "Autumn" = autumn_color)
+```
+
+```{r data-daily}
+#| echo: false
+#| warning: false
+
+path <- paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_sum.nc", sep="")
+tp_d <- nc_open(path)
+# extracting time (and transforming to dates, since we don't use the hours)
+cf <- CFtime(tp_d$dim$time$units, tp_d$dim$time$calendar, tp_d$dim$time$vals)
+
+dates <- substring(CFtimestamp(cf), 1,10)
+days <- as.numeric(substring(CFtimestamp(cf), 9,10))
+months <- as.numeric(substring(CFtimestamp(cf), 6,7))
+years <- as.numeric(substring(CFtimestamp(cf), 1,4))
+
+daily_df_neg <- data.frame(year = years, month = months, day = days, date=dates, tp = ncvar_get(tp_d, "tp")*1000/9)
+daily_df <- daily_df_neg %>% mutate(tp = ifelse(tp < 0, 0, tp))
+daily_tp_positive <- daily_df$tp[daily_df$tp > 0]
+
+
+get_season_d <- function(month, day) {
+  if ((month == 12 && day >= 21) || month %in% c(1, 2) || (month == 3 && day < 20)) {
+    return("Winter")
+  } else if ((month == 3 && day >= 20) || month %in% c(4, 5) || (month == 6 && day < 21)) {
+    return("Spring")
+  } else if ((month == 6 && day >= 21) || month %in% c(7, 8) || (month == 9 && day < 22)) {
+    return("Summer")
+  } else if ((month == 9 && day >= 22) || month %in% c(10, 11) || (month == 12 && day < 21)) {
+    return("Autumn")
+  }
+}
+
+# Vectorize the get_season function
+get_season_vec_d <- Vectorize(get_season_d)
+# Add a season column
+daily_df <- daily_df %>%
+  mutate(season = get_season_vec_d(month, day)) %>%
+  select(date, tp, year, season, month, day)
+```
+
+select(date, tp, rx1d, rx5d, year, season, month)
+
+```{r data-monthly}
+#| echo: false
+#| warning: false
+
+tp_m <- nc_open(paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_monthly_sum.nc", sep=""))
+rx1d <- nc_open( paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_rx1d_monthly_sum.nc", sep=""))
+rx5d <- nc_open( paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_rx5d_monthly_sum.nc", sep=""))
+
+cf_m <- CFtime(tp_m$dim$time$units, tp_m$dim$time$calendar, tp_m$dim$time$vals)
+dates <- substring(CFtimestamp(cf_m), 1,7)
+years <- as.numeric(substring(CFtimestamp(cf_m), 1,4))
+months <- as.numeric(substring(CFtimestamp(cf_m), 6,7))
+
+monthly_df <- data.frame(year = years, month = months, date=dates, tp = ncvar_get(tp_m, "tp")*1000/9, rx1d = ncvar_get(rx1d, "tp")*1000/9, rx5d = ncvar_get(rx5d, "tp")*1000/9)
+
+get_season_m <- function(month) {
+  # month <- month(date)
+  ifelse(month %in% c(12, 01, 02), "Winter",
+         ifelse(month %in% c(03, 04, 05), "Spring",
+                ifelse(month %in% c(06, 07, 08), "Summer", "Autumn")))
+}
+
+# Add a season column
+monthly_df <- monthly_df %>%
+  mutate(season = get_season_m(month)) %>%
+  select(date, tp, rx1d, rx5d, year, season, month)
+```
+
+## first look
+
+```{r tp-daily}
+#| echo: false
+
+## TIME SERIES
+daily_ts <- ts(data = daily_df[,2], start = c(1990,1,1), frequency = 365)
+
+autoplot(daily_ts, color = color2) + ylab("Depth of precipitation over gridbox (in mm)") + xlab("Date") + theme_bw()
+```
+
+```{r tp-monthly}
+#| echo: false
+
+## TIME SERIES
+monthly_ts <- ts(data = monthly_df$tp, start = c(1990,1), frequency = 12)
+
+autoplot(monthly_ts, color = color2) + ylab("Depth of precipitation over gridbox (in mm)") + xlab("Datetime") + theme_bw()
+
+monthly_ts <- data.frame(tp = ts(data = monthly_df$tp, frequency = 12, start = c(1990,01)), rx1d = ts(data = monthly_df$rx1d, frequency = 12, start = c(1990,01)), rx5d = ts(data = monthly_df$rx5d, frequency = 12, start = c(1990,01)))
+
+
+autoplot(monthly_ts$tp) + geom_smooth(color = color2, fill = color2) + ylab("Depth of precipitation over gridbox (in mm)") + xlab("Date") + theme_bw()
+autoplot(monthly_ts$rx1d) + geom_smooth(color = color3, fill = color3) + ylab("Depth of precipitation over gridbox (in mm)") + xlab("Date") + theme_bw()
+autoplot(monthly_ts$rx5d) + geom_smooth(color = color1, fill = color1) + ylab("Depth of precipitation over gridbox (in mm)") + xlab("Date") + theme_bw()
+
+```
+
+```{r adf}
+adf.test(monthly_ts$tp)
+```
+
+```{r daily-decomposed}
+daily_ts <- ts(data = daily_df$tp, start = c(1990,1,1), frequency = 365)
+# daily_fitted_a <- decompose(daily_ts, "additive")
+# plot(daily_fitted_a)
+# decomposed_df <- data.frame(
+#   date = as.Date(daily_df$date),
+#   trend = monthly_fitted_a$trend,
+#   seasonal = monthly_fitted_a$seasonal,
+#   random = monthly_fitted_a$random
+# )
+# ggplot(decomposed_df, aes(x = date, y = trend)) +
+#   geom_line(color = "black") +  # Original trend line in black
+#   geom_smooth(color = color2, fill = color2) +  # Smooth trend line with color2
+#   ylab("Depth of precipitation over gridbox (in mm)") + 
+#   xlab("Date") + 
+#   theme_bw()  # Use a clean black-and-white theme
+# 
+# ggplot(decomposed_df, aes(x = date, y = seasonal)) +
+#   geom_line(color = "black") +  # Original trend line in black
+#   geom_smooth(color = color2, fill = color2) +  # Smooth trend line with color2
+#   ylab("Depth of precipitation over gridbox (in mm)") + 
+#   xlab("Date") + 
+#   theme_bw()  # Use a clean black-and-white theme
+```
+
+```{r monthly-decomposed}
+monthly_fitted_a <- decompose(monthly_ts$tp, "additive")
+plot(monthly_fitted_a, col = color2)
+decomposed_df <- data.frame(
+  date = as.Date(paste0(monthly_df$date, "-01")),
+  trend = monthly_fitted_a$trend,
+  seasonal = monthly_fitted_a$seasonal,
+  random = monthly_fitted_a$random
+)
+trend.plot <- ggplot(decomposed_df, aes(x = date, y = trend)) +
+  geom_line(color = "black") +  # Original trend line in black
+  geom_smooth(color = color2, fill = color2) +  # Smooth trend line with color2
+  ylab("") + 
+  xlab("year") + 
+  theme_bw()  # Use a clean black-and-white theme
+trend.plot
+ggsave(paste(city, "_trend_plot_wider.pdf"), plot = trend.plot, width = 40, height = 5, units = "in")  # Adjust width and height as needed
+
+seasonal.plot <- ggplot(decomposed_df, aes(x = date, y = seasonal)) +
+  geom_line(color = color2) +  # Original trend line in black
+  ylab("") + 
+  xlab("year") + 
+  theme_bw()  # Use a clean black-and-white theme
+ggsave(paste(city, "_seasonal_plot_wider.pdf"), plot = seasonal.plot, width = 40, height = 5, units = "in")  # Adjust width and height as needed
+
+```
+
+```{r rx1d-decomposed}
+monthly_fitted_rx1d <- decompose(monthly_ts$rx1d, "additive")
+plot(monthly_fitted_rx1d, col = color3)
+decomposed_df_rx1d <- data.frame(
+  date = as.Date(paste0(monthly_df$date, "-01")),
+  trend = monthly_fitted_rx1d$trend,
+  seasonal = monthly_fitted_rx1d$seasonal,
+  random = monthly_fitted_rx1d$random
+)
+trend.plot.rx1d <- ggplot(decomposed_df_rx1d, aes(x = date, y = trend)) +
+  geom_line(color = "black") +  # Original trend line in black
+  geom_smooth(color = color3, fill = color3) +  # Smooth trend line with color2
+  ylab("") + 
+  xlab("year") + 
+  theme_bw()  # Use a clean black-and-white theme
+trend.plot.rx1d
+ggsave(paste(city, "_trend_plot_wider_rx1d.pdf"), plot = trend.plot.rx1d, width = 40, height = 5, units = "in")  # Adjust width and height as needed
+
+seasonal.plot.rx1d <- ggplot(decomposed_df_rx1d, aes(x = date, y = seasonal)) +
+  geom_line(color = color3) +  # Original trend line in black
+  ylab("") + 
+  xlab("Date") + 
+  theme_bw()  # Use a clean black-and-white theme
+seasonal.plot.rx1d
+ggsave(paste(city, "_seasonal_plot_wider_rx1d.pdf"), plot = seasonal.plot.rx1d, width = 40, height = 5, units = "in")  # Adjust width and height as needed
+```
+
+```{r rx5d-decomposed}
+monthly_fitted_rx5d <- decompose(monthly_ts$rx5d, "additive")
+plot(monthly_fitted_rx5d, col = color1)
+decomposed_df_rx5d <- data.frame(
+  date = as.Date(paste0(monthly_df$date, "-01")),
+  trend = monthly_fitted_rx5d$trend,
+  seasonal = monthly_fitted_rx5d$seasonal,
+  random = monthly_fitted_rx5d$random
+)
+trend.plot.rx5d <- ggplot(decomposed_df_rx5d, aes(x = date, y = trend)) +
+  geom_line(color = "black") +  # Original trend line in black
+  geom_smooth(color = color1, fill = color1) +  # Smooth trend line with color2
+  ylab("") + 
+  xlab("year") + 
+  theme_bw()  # Use a clean black-and-white theme
+trend.plot.rx5d
+ggsave(paste(city, "_trend_plot_wider_rx5d.pdf"), plot = trend.plot.rx5d, width = 40, height = 5, units = "in")  # Adjust width and height as needed
+
+seasonal.plot.rx5d <- ggplot(decomposed_df_rx5d, aes(x = date, y = seasonal)) +
+  geom_line(color = color1) +  # Original trend line in black
+  ylab("") + 
+  xlab("Date") + 
+  theme_bw()  # Use a clean black-and-white theme
+seasonal.plot.rx5d
+ggsave(paste(city, "_seasonal_plot_wider_rx5d.pdf"), plot = seasonal.plot.rx5d, width = 40, height = 5, units = "in")  # Adjust width and height as needed
+```
+
+```{r seasonal}
+seasonal_tp_sum <- daily_df %>%
+  group_by(year, season) %>%
+  summarize(total_tp = sum(tp, na.rm = TRUE))
+
+ggplot(data = seasonal_tp_sum, aes(x = year, y = total_tp, color = season)) +
+  geom_line() +  # Line plot for each season 
+  geom_smooth() + 
+#, color = color2, fill = color2) +
+  facet_wrap(~ season, scales = "fixed", ncol = 2) +  # Separate plots for each season
+  labs(title = "", x = "Year", y = "Depth of precipitation over gridbox (in mm)") +
+  scale_color_manual(values = c(autumn_color, spring_color, summer_color, winter_color)) +  # Custom color for each season
+  theme_minimal()
+```
+
+```{r yearly}
+#| echo: false
+
+yearly_tp <- aggregate(monthly_ts$tp, FUN = sum)
+yearly_rx1d <- aggregate(monthly_ts$rx1d, FUN = sum)
+yearly_rx5d <- aggregate(monthly_ts$rx5d, FUN = sum)
+
+yearly_ts <- data.frame(date = 1990:2023, tp = aggregate(monthly_ts$tp, FUN = sum), rx1d = aggregate(monthly_ts$rx1d, FUN = sum), rx5d = aggregate(monthly_ts$rx5d, FUN = sum))
+
+ggplot(yearly_ts, aes(date)) +   
+  geom_line(aes(y = tp, col = "tp"))+
+  geom_line(aes(y = rx5d, col = "rx5d")) + 
+  geom_line(aes(y = rx1d, col = "rx1d")) +
+  labs(title = "",
+       x = "Date",
+       y = "Depth of precipitation over gridbox (in mm)") +
+  scale_color_manual(name = "", values = c("tp" = color2, "rx5d" = color1, "rx1d" = color3), labels = c("tp" = "tp", "rx5d" = "rx5d", "rx1d" = "rx1d"))
+```
+
+```{r relation-plots}
+tsdisplay(monthly_ts$tp, col  = color2)
+lag2.plot(monthly_ts$tp, monthly_ts$rx1d, 0) 
+lag2.plot(monthly_ts$tp, monthly_ts$rx5d, 0)
+lag2.plot(monthly_ts$rx1d, monthly_ts$rx5d, 0)
+```
+
+## density
+
+```{r density}
+plot(density(monthly_df$tp), col = color2, main = "")
+plot(density(daily_df$tp), col = color2, main = "")
+hist(monthly_df$tp,col = color2, main = "")
+hist(daily_df$tp,col = color2, main = "")
+
+
+
+# Create an empty plot
+plot(NA, xlim = range(daily_df$tp), ylim = c(0, 0.3), xlab = "tp", ylab = "Density", main = "")
+
+# Plot density for each season
+for (season in unique(daily_df$season)) {
+  # Subset data for the current season
+  subset_data <- daily_df$tp[daily_df$season == season]
+  
+  # Compute density
+  dens <- density(subset_data)
+  
+  # Plot density with the corresponding color
+  lines(dens, col = colors[season])
+}
+
+# Add a legend
+legend("topright", legend = names(colors), col = colors, lty = 1, cex = 0.8)
+
+# Create an empty plot
+plot(NA, xlim = range(monthly_df$tp), ylim = c(0, 0.01), xlab = "tp", ylab = "Density", main = "")
+
+# Plot density for each season
+for (season in unique(monthly_df$season)) {
+  # Subset data for the current season
+  subset_data <- monthly_df$tp[monthly_df$season == season]
+  
+  # Compute density
+  dens <- density(subset_data)
+  
+  # Plot density with the corresponding color
+  lines(dens, col = colors[season])
+}
+
+# Add a legend
+legend("topright", legend = names(colors), col = colors, lty = 1, cex = 0.8)
+```
+
+```{r monthly-by-month-tp}
+plot <- ggsubseriesplot(monthly_ts$tp, polar = TRUE)
+
+# Customize labels
+plot + 
+  labs(
+    x = "Months",                     # Change the x-axis label
+    y = "Total monthly precipitation over gridbox (in mm)" 
+  ) 
+```
