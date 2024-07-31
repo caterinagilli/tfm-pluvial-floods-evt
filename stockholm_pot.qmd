@@ -1,0 +1,210 @@
+---
+title: "Stockholm POV"
+format: 
+  html:
+    embed-resources: false
+    fig-format: pdf
+
+
+editor: visual
+---
+
+## data
+
+```{r libraries}
+#| echo: false
+#| warning: false
+
+library(ggplot2); theme_set(theme_minimal())
+library(forecast)
+library(seasonal)
+library(tseries)
+library(ncdf4) # package for netcdf manipulation
+library(CFtime)
+library(dplyr)
+library(astsa)
+library(tseries)
+#install.packages("ClimInd")
+library(ClimInd)
+library(extRemes)
+```
+
+```{r edit}
+city <- "stockholm"
+color1 <- "darkgreen" #rx5d
+color2 <- "aquamarine4" #base
+color3 <- "lightgreen" #rx1d
+winter_color <- "skyblue"
+spring_color <- "springgreen3"
+summer_color <- "gold"
+autumn_color <- "tomato3"
+
+colors <- c("Winter" = winter_color, "Spring" = spring_color, "Summer" = summer_color, "Autumn" = autumn_color)
+```
+
+```{r data-daily}
+#| echo: false
+#| warning: false
+
+path <- "C:/Users/caterina.gilli/000/uni/TFM/data/tp_sto/stockholm_daily_sum.nc"
+tp_d <- nc_open(path)
+# extracting time (and transforming to dates, since we don't use the hours)
+cf <- CFtime(tp_d$dim$time$units, tp_d$dim$time$calendar, tp_d$dim$time$vals)
+
+dates <- substring(CFtimestamp(cf), 1,10)
+days <- as.numeric(substring(CFtimestamp(cf), 9,10))
+months <- as.numeric(substring(CFtimestamp(cf), 6,7))
+years <- as.numeric(substring(CFtimestamp(cf), 1,4))
+
+daily_df_neg <- data.frame(year = years, month = months, day = days, date=dates, tp = ncvar_get(tp_d, "tp")*1000/88)
+daily_df <- daily_df_neg %>% mutate(tp = ifelse(tp < 0, 0, tp))
+daily_tp_positive <- daily_df$tp[daily_df$tp > 0]
+
+get_season_d <- function(month, day) {
+  if ((month == 12 && day >= 21) || month %in% c(1, 2) || (month == 3 && day < 20)) {
+    return("Winter")
+  } else if ((month == 3 && day >= 20) || month %in% c(4, 5) || (month == 6 && day < 21)) {
+    return("Spring")
+  } else if ((month == 6 && day >= 21) || month %in% c(7, 8) || (month == 9 && day < 22)) {
+    return("Summer")
+  } else if ((month == 9 && day >= 22) || month %in% c(10, 11) || (month == 12 && day < 21)) {
+    return("Autumn")
+  }
+}
+
+# Vectorize the get_season function
+get_season_vec_d <- Vectorize(get_season_d)
+# Add a season column
+daily_df <- daily_df %>%
+  mutate(season = get_season_vec_d(month, day)) %>%
+  select(date, tp, year, season, month, day)
+```
+
+```{r data-monthly}
+#| echo: false
+#| warning: false
+
+tp_m <- nc_open(paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_monthly_sum.nc", sep=""))
+rx1d <- nc_open( paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_rx1d_monthly_sum.nc", sep=""))
+rx5d <- nc_open( paste("C:/Users/caterina.gilli/000/uni/TFM/data/tp_may/",city, "/tp_", city, "_rx5d_monthly_sum.nc", sep=""))
+
+cf_m <- CFtime(tp_m$dim$time$units, tp_m$dim$time$calendar, tp_m$dim$time$vals)
+dates <- substring(CFtimestamp(cf_m), 1,7)
+years <- as.numeric(substring(CFtimestamp(cf_m), 1,4))
+months <- as.numeric(substring(CFtimestamp(cf_m), 6,7))
+
+monthly_df <- data.frame(year = years, month = months, date=dates, tp = ncvar_get(tp_m, "tp"), rx1d = ncvar_get(rx1d, "tp"), rx5d = ncvar_get(rx5d, "tp"))
+
+get_season_m <- function(month) {
+  # month <- month(date)
+  ifelse(month %in% c(12, 01, 02), "Winter",
+         ifelse(month %in% c(03, 04, 05), "Spring",
+                ifelse(month %in% c(06, 07, 08), "Summer", "Autumn")))
+}
+
+# Add a season column
+monthly_df <- monthly_df %>%
+  mutate(season = get_season_m(month)) %>%
+  select(date, tp, rx1d, rx5d, year, season, month)
+```
+
+```{r bm}
+blocks.y <- blockmaxxer(daily_df, blocks = daily_df$year, which = "tp")
+#colnames(blocks.y)[2] <- "yearly_max"
+blocks.m <- blockmaxxer(daily_df, blocks = daily_df$month, which = "tp")
+#colnames(blocks.m)[2] <- "monthly_max"
+```
+
+## pot
+
+```{r pot}
+#threshrange.plot(monthly_df$tp, r = c(0.5, 1.5), nint = 20)
+threshrange.plot(daily_tp_positive, r = c(min(blocks.y$tp), max(daily_df$tp)), nint = 20)
+threshrange.plot(daily_tp_positive, r = c(min(blocks.y$tp), quantile(daily_df$tp, probs=0.99, na.rm=TRUE)), nint = 20)
+quantile(daily_df$tp, probs=0.9, na.rm=TRUE)
+threshrange.plot(daily_df$tp, r = c(quantile(daily_df$tp, probs=0.9, na.rm=TRUE), quantile(daily_df$tp, probs=0.99, na.rm=TRUE)), nint = 20)
+threshrange.plot(daily_df$tp, r = c(quantile(daily_df$tp, probs=0.9, na.rm=TRUE), max(daily_df$tp, na.rm=TRUE)), nint = 20)
+max(daily_df$tp)
+
+max(daily_df$tp)
+min(daily_df$tp)
+#mrlplot(daily_df$tp, 20)
+# Customizing the plot if negative values are undesired
+#mrl <- mrlplot(daily_df$tp)
+POT::mrlplot(daily_df$tp, col = c('grey', color2, 'grey'), main = "")
+POT::mrlplot(daily_tp_positive, col = c('grey', color2, 'grey'), main = "")
+```
+
+```{r pot-fit}
+# Modify the x-axis limits (assuming you don't want negative thresholds)
+threshold <- 10.5
+fitFC <- fevd(tp, daily_df, threshold = threshold, type = "GP")
+plot(fitFC, col = color2, main = "")
+fitFC 
+
+# fitFC.2 <- fevd(tp, daily_df, threshold = threshold.2, type = "GP")
+# plot(fitFC.2, col = color2, main = "")
+# fitFC.2
+fitFC.90 <- fevd(tp, daily_df, threshold = quantile(daily_df$tp, 0.90), type = "GP")
+plot(fitFC.90, col = color3, main = "")
+fitFC.90
+
+fitFC.95 <- fevd(tp, daily_df, threshold = quantile(daily_df$tp, 0.95), type = "GP")
+plot(fitFC.90, col = color2, main = "")
+fitFC.95
+
+fitFC.99 <- fevd(tp, daily_df, threshold = quantile(daily_df$tp, 0.99), type = "GP")
+plot(fitFC.99, col = color1, main = "")
+fitFC.99
+```
+
+```{r pov-above-threshold-daily}
+# Filter the dataframe to keep only the values above the 90th percentile
+filtered_data_90 <- daily_df[daily_df$tp >= quantile(daily_df$tp, 0.90), ]
+filtered_data_90 <- filtered_data_90 %>%
+  select(date, tp, year, season, month)
+colnames(filtered_data_90)[2] <- "tp_90"
+
+# Filter the dataframe to keep only the values above the 95th percentile
+filtered_data_95 <- daily_df[daily_df$tp >= quantile(daily_df$tp, 0.95), ]
+filtered_data_95 <- filtered_data_95 %>%
+  select(date, tp, year, season, month)
+colnames(filtered_data_95)[2] <- "tp_95"
+
+# Filter the dataframe to keep only the values above the 99th percentile
+filtered_data_99 <- daily_df[daily_df$tp >= quantile(daily_df$tp, 0.99), ]
+filtered_data_99 <- filtered_data_99 %>%
+  select(date, tp, year, season, month)
+colnames(filtered_data_99)[2] <- "tp_99"
+
+all_dates <- data.frame(year = daily_df$year, month = daily_df$month, date = daily_df$date, season = daily_df$season)
+
+complete_data <- data.frame(all_dates) %>%
+  left_join(filtered_data_90, by = c("year", "month", "date", "season")) %>%
+  left_join(filtered_data_95, by = c("year", "month", "date", "season"))%>%
+  left_join(filtered_data_99, by = c("year", "month", "date", "season"))
+
+ggplot(complete_data, aes(x = year)) + 
+  # geom_line(na.rm = TRUE) +    # For a line plot
+  # geom_point(y=tp_90, na.rm = TRUE)+
+  geom_point(aes(y=tp_90, col = "90th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_95, col = "95th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_point(aes(y=tp_99, col = "99th percentile"), na.rm = TRUE) +   # To add points on the line
+  geom_hline(yintercept = threshold, col = "red") +
+  # geom_hline(yintercept = threshold.2, col = "darkred") +
+  labs(title = "",
+       x = "year",
+       y = "tp") +
+  scale_color_manual(name = "", values = c("90th percentile" = color3, "95th percentile" = color2, "99th percentile" = color1), labels = c("90th percentile", "95th percentile", "99th percentile"), aesthetics = c("colour", "fill")) +
+   theme(axis.text.x=element_text(angle = 75, hjust = 0.5, vjust = 0.7)) + 
+  scale_x_continuous(breaks = complete_data$year)
+
+```
+
+```{r ci}
+threshold
+ci(fitFC, type="parameter")
+ci(fitFC.90, type="parameter")
+ci(fitFC.95, type="parameter")
+ci(fitFC.95, type="parameter")
+```
